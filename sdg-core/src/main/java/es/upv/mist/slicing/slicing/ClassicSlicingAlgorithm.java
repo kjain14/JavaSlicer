@@ -22,17 +22,29 @@ public class ClassicSlicingAlgorithm implements SlicingAlgorithm {
 
     @Override
     public Slice traverseProcedure(GraphNode<?> slicingCriterion) {
-        Slice slice = new Slice(Set.of(slicingCriterion));
-        pass(slice, this::ignoreProcedure);
-        return slice;
+        Slice sliceAggregate = new Slice(Set.of(slicingCriterion));
+        Set<GraphNode<?>> visitedAgg = new HashSet<>();
+
+        passBackwards(sliceAggregate, visitedAgg, this::ignoreProcedure);
+        passForwards(sliceAggregate, visitedAgg, this::ignoreProcedure);
+
+        visitedAgg.forEach(sliceAggregate::add);        
+        return sliceAggregate;
     }
 
     @Override
     public Slice traverse(Set<GraphNode<?>> slicingCriterion) {
-        Slice slice = new Slice(slicingCriterion);
-        pass(slice, this::ignorePass1);
-        pass(slice, this::ignorePass2);
-        return slice;
+        Slice sliceAggregate = new Slice(slicingCriterion);
+        Set<GraphNode<?>> visitedAgg = new HashSet<>();
+
+        passBackwards(sliceAggregate, visitedAgg, this::ignorePass1);
+        passBackwards(sliceAggregate, visitedAgg, this::ignorePass2);
+
+        passForwards(sliceAggregate, visitedAgg, this::ignorePass1);
+        passForwards(sliceAggregate, visitedAgg, this::ignorePass2);
+
+        visitedAgg.forEach(sliceAggregate::add);
+        return sliceAggregate;
     }
 
     /** The condition to ignore arcs in the first pass of the algorithm. */
@@ -52,7 +64,7 @@ public class ClassicSlicingAlgorithm implements SlicingAlgorithm {
 
     /** A single pass: the edges are traversed until no new node can be added. Reached nodes
      *  are stored in the first parameter, and arcs that match the second are ignored. */
-    protected void pass(Slice slice, Predicate<Arc> ignoreCondition) {
+    protected void passBackwards(Slice slice, Set<GraphNode<?>> visitedAgg, Predicate<Arc> ignoreCondition) {
         // `toVisit` behaves like a set and using iterable we can use it as a queue
         // More info: https://stackoverflow.com/a/2319126
         LinkedHashSet<GraphNode<?>> toVisit = new LinkedHashSet<>(slice.getGraphNodes());
@@ -71,9 +83,38 @@ public class ClassicSlicingAlgorithm implements SlicingAlgorithm {
                 GraphNode<?> source = graph.getEdgeSource(arc);
                 if (!visited.contains(source))
                     toVisit.add(source);
+                if (!visitedAgg.contains(source))
+                    visitedAgg.add(source);
             }
         }
 
-        visited.forEach(slice::add);
+    }
+
+    /** A single pass: the edges are traversed until no new node can be added. Reached nodes
+     *  are stored in the first parameter, and arcs that match the second are ignored. */
+    protected void passForwards(Slice slice, Set<GraphNode<?>> visitedAgg, Predicate<Arc> ignoreCondition) {
+        // `toVisit` behaves like a set and using iterable we can use it as a queue
+        // More info: https://stackoverflow.com/a/2319126
+        LinkedHashSet<GraphNode<?>> toVisit = new LinkedHashSet<>(slice.getGraphNodes());
+        Set<GraphNode<?>> visited = new HashSet<>();
+
+        while (!toVisit.isEmpty()) {
+            GraphNode<?> node = Utils.setPop(toVisit);
+            // Avoid duplicate traversal
+            if (visited.contains(node))
+                continue;
+            visited.add(node);
+            // Traverse all edges forwards
+            for (Arc arc : graph.outgoingEdgesOf(node)) {
+                if (ignoreCondition.test(arc))
+                    continue;
+                GraphNode<?> target = graph.getEdgeTarget(arc);
+                if (!visited.contains(target))
+                    toVisit.add(target);
+                if (!visitedAgg.contains(target))
+                    visitedAgg.add(target);
+            }
+        }
+
     }
 }
